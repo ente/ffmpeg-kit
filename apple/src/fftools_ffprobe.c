@@ -3384,7 +3384,7 @@ static int open_input_file(InputFile *ifile, const char *filename,
 
     ifile->streams = av_calloc(fmt_ctx->nb_streams, sizeof(*ifile->streams));
     if (!ifile->streams)
-        exit(1);
+        return AVERROR(ENOMEM);
     ifile->nb_streams = fmt_ctx->nb_streams;
 
     /* bind a decoder to each input stream */
@@ -3414,12 +3414,14 @@ static int open_input_file(InputFile *ifile, const char *filename,
                                                    fmt_ctx, stream, codec);
 
             ist->dec_ctx = avcodec_alloc_context3(codec);
-            if (!ist->dec_ctx)
-                exit(1);
+            if (!ist->dec_ctx) {
+                err = AVERROR(ENOMEM);
+                goto end;
+            }
 
             err = avcodec_parameters_to_context(ist->dec_ctx, stream->codecpar);
             if (err < 0)
-                exit(1);
+                goto end;
 
             if (do_show_log) {
                 // For loging it is needed to disable at least frame threads as otherwise
@@ -3430,17 +3432,23 @@ static int open_input_file(InputFile *ifile, const char *filename,
 
             ist->dec_ctx->pkt_timebase = stream->time_base;
 
-            if (avcodec_open2(ist->dec_ctx, codec, &opts) < 0) {
+            err = avcodec_open2(ist->dec_ctx, codec, &opts);
+            if (err < 0) {
                 av_log(NULL, AV_LOG_WARNING, "Could not open codec for input stream %d\n",
                        stream->index);
-                exit(1);
+                goto end;
             }
 
             if ((t = av_dict_get(opts, "", NULL, AV_DICT_IGNORE_SUFFIX))) {
                 av_log(NULL, AV_LOG_ERROR, "Option %s for input stream %d not found\n",
                        t->key, stream->index);
-                return AVERROR_OPTION_NOT_FOUND;
+                err = AVERROR_OPTION_NOT_FOUND;
             }
+
+end:
+            av_dict_free(&opts);
+            if (err < 0)
+                return err;
         }
     }
 
